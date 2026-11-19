@@ -31,9 +31,9 @@ jobs:
 
       - name: Generate abuild signing keys
         run: |
-          mkdir -p /root/.abuild /etc/apk/keys
+          mkdir -p "$HOME/.abuild" /etc/apk/keys
           abuild-keygen -a -n
-          cp /root/.abuild/*.rsa.pub /etc/apk/keys/
+          cp "$HOME/.abuild/"*.rsa.pub /etc/apk/keys/
 
       - name: Clone Alpine aports scripts
         run: |
