@@ -38,6 +38,8 @@ jobs:
       - name: Clone Alpine aports scripts
         run: |
           git clone --depth=1 --branch "${ALPINE_BRANCH}" \
+            https://github.com/alpinelinux/aports.git /tmp/aports || \
+          git clone --depth=1 --branch "${ALPINE_BRANCH}" \
             https://gitlab.alpinelinux.org/alpine/aports.git /tmp/aports
 
       - name: Create kestrelos profile and boot overlay
