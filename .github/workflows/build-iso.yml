@@ -1,4 +1,4 @@
-﻿name: Build prismOS ISO
+name: Build prismOS ISO
 
 on:
   push:
