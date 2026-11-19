@@ -1,0 +1,31 @@
+prismOS Custom License
+
+1. Scope
+This license applies to prismOS and all associated scripts, configurations,
+tools, and components included within it ("the Software"). prismOS is a
+simple, optimized operating system built on Alpine Linux.
+
+2. No Copying or Redistribution
+You may not copy, clone, mirror, repackage, sell, sublicense, or
+redistribute prismOS or any part of the Software without explicit written
+permission from the author.
+
+3. No Parental Controls
+prismOS does not include, provide, or enforce any parental controls, content
+filtering, screen-time restrictions, or monitoring features. Any access or
+usage management is solely the responsibility of the user or system
+administrator.
+
+4. No Trademark Rights
+This license does not grant any rights, title, or interest in the name
+"prismOS" or any logos, icons, branding, or marks associated with prismOS.
+No trademarks or brand identifiers may be used without prior written consent.
+
+5. No Warranty and Limitation of Liability
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL
+THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
