@@ -1,0 +1,165 @@
+﻿name: Build prismOS ISO
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ALPINE_BRANCH: "3.21-stable"
+  ALPINE_TAG: "v3.21"
+  MAX_ISO_MB: "3072"
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.21
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout prismOS repository
+        uses: actions/checkout@v4
+
+      - name: Install Alpine ISO build dependencies
+        run: |
+          apk update
+          apk add --no-cache \
+            abuild alpine-conf alpine-sdk bash build-base \
+            dosfstools e2fsprogs git grub grub-efi \
+            mtools squashfs-tools syslinux xorriso
+
+      - name: Generate abuild signing keys
+        run: |
+          mkdir -p /root/.abuild
+          abuild-keygen -a -i -n
+
+      - name: Clone Alpine aports scripts
+        run: |
+          git clone --depth=1 --branch "${ALPINE_BRANCH}" \
+            https://gitlab.alpinelinux.org/alpine/aports.git /tmp/aports
+
+      - name: Create prismOS profile and boot overlay
+        run: |
+          cat > /tmp/aports/scripts/mkimg.prismos.sh << 'EOF'
+          profile_prismos() {
+            profile_standard
+            title="prismOS"
+            desc="Lightweight Alpine-based prismOS"
+            arch="x86_64"
+            kernel_flavors="lts"
+            kernel_cmdline="quiet"
+            apks="$apks
+              alpine-base openrc busybox util-linux e2fsprogs dosfstools
+              dropbear openssh-client curl htop tmux git
+              labwc foot swaybg seatd dbus eudev mesa-dri-gallium font-dejavu
+            "
+            apkovl="genapkovl-prismos.sh"
+          }
+          EOF
+          chmod +x /tmp/aports/scripts/mkimg.prismos.sh
+
+          cat > /tmp/aports/scripts/genapkovl-prismos.sh << 'EOF'
+          #!/bin/sh -e
+          HOSTNAME="$1"
+          [ -n "$HOSTNAME" ] || HOSTNAME="prismos"
+
+          cleanup() { rm -rf "$tmp"; }
+          tmp="$(mktemp -d)"
+          trap cleanup EXIT
+
+          mkdir -p "$tmp/etc/apk" "$tmp/etc/init.d" "$tmp/etc/runlevels/boot" \
+                   "$tmp/etc/runlevels/default" "$tmp/etc/prismos"
+
+          echo "$HOSTNAME" > "$tmp/etc/hostname"
+
+          cat > "$tmp/etc/apk/world" << 'WORLD'
+          alpine-base
+          openrc
+          dropbear
+          curl
+          htop
+          tmux
+          git
+          WORLD
+
+          cat > "$tmp/etc/prismos/prismos.conf" << 'CONF'
+          PRISMOS_MODE="server"
+          MEMORY_MODE="zram"
+          ZRAM_SIZE="2G"
+          ZRAM_ALGO="zstd"
+          SWAP_SIZE="1G"
+          SWAP_FILE="/var/lib/prismos/swapfile"
+          SWAPPINESS="60"
+          SSH_ENABLED="yes"
+          SSH_PORT="22"
+          PRISMOS_THEME="prism-dark"
+          WALLPAPER_URL="https://cdn.discordapp.com/attachments/1572989828767678545/1572990606798749836/wallpaper.png?ex=6b006129&is=6aff0fa9&hm=3206d2f09d3fbd2f80a4b84ac72ce3a2ea3b5d154aad55e0a9fa54da2f3e47f7"
+          CONF
+
+          cat > "$tmp/etc/init.d/prismos-memory" << 'MEMSCRIPT'
+          #!/sbin/openrc-run
+          description="Configure prismOS 2GB zram and swap"
+          depend() {
+            need localmount sysctl
+            before swap
+          }
+          start() {
+            [ -f /etc/prismos/prismos.conf ] && . /etc/prismos/prismos.conf
+            sysctl -w vm.swappiness="${SWAPPINESS:-60}" >/dev/null 2>&1 || true
+            modprobe zram num_devices=1 2>/dev/null || true
+            if [ "${MEMORY_MODE:-zram}" = "zram" ] || [ "${MEMORY_MODE:-zram}" = "both" ]; then
+              if [ -e /sys/block/zram0 ]; then
+                echo 1 > /sys/block/zram0/reset 2>/dev/null || true
+                echo "${ZRAM_ALGO:-zstd}" > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+                echo "${ZRAM_SIZE:-2G}" > /sys/block/zram0/disksize
+                mkswap /dev/zram0 >/dev/null
+                swapon -p 100 /dev/zram0
+              fi
+            fi
+            if [ "${MEMORY_MODE:-zram}" = "swap" ] || [ "${MEMORY_MODE:-zram}" = "both" ]; then
+              mkdir -p /var/lib/prismos
+              [ -f "${SWAP_FILE:-/var/lib/prismos/swapfile}" ] || fallocate -l "${SWAP_SIZE:-1G}" "${SWAP_FILE:-/var/lib/prismos/swapfile}"
+              chmod 600 "${SWAP_FILE:-/var/lib/prismos/swapfile}"
+              mkswap "${SWAP_FILE:-/var/lib/prismos/swapfile}" >/dev/null
+              swapon -p 10 "${SWAP_FILE:-/var/lib/prismos/swapfile}"
+            fi
+            eend 0
+          }
+          MEMSCRIPT
+          chmod +x "$tmp/etc/init.d/prismos-memory"
+
+          ln -sf /etc/init.d/prismos-memory "$tmp/etc/runlevels/boot/prismos-memory"
+          ln -sf /etc/init.d/dropbear "$tmp/etc/runlevels/default/dropbear"
+
+          tar -c -C "$tmp" etc | gzip -9n > "$HOSTNAME.apkovl.tar.gz"
+          EOF
+          chmod +x /tmp/aports/scripts/genapkovl-prismos.sh
+
+      - name: Build bootable prismOS ISO
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/out" /tmp/work
+          sh /tmp/aports/scripts/mkimage.sh \
+            --tag "${ALPINE_TAG}" \
+            --outdir "${GITHUB_WORKSPACE}/out" \
+            --workdir /tmp/work \
+            --arch x86_64 \
+            --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_TAG}/main" \
+            --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_TAG}/community" \
+            --profile prismos
+
+      - name: Rename and verify ISO (< 3 GB)
+        run: |
+          ISO_FILE=$(ls -1 "${GITHUB_WORKSPACE}"/out/*.iso | head -n 1)
+          [ -f "$ISO_FILE" ] || { echo "No ISO generated"; exit 1; }
+          mv "$ISO_FILE" "${GITHUB_WORKSPACE}/out/prismOS-x86_64.iso"
+          SIZE_MB=$(( $(stat -c%s "${GITHUB_WORKSPACE}/out/prismOS-x86_64.iso") / 1048576 ))
+          echo "Built prismOS-x86_64.iso (${SIZE_MB} MB)"
+          [ "$SIZE_MB" -lt "$MAX_ISO_MB" ] || { echo "ISO exceeds 3 GB"; exit 1; }
+
+      - name: Upload prismOS ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prismOS-x86_64-iso
+          path: out/prismOS-x86_64.iso
+          retention-days: 30
