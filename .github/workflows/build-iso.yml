@@ -47,14 +47,14 @@ jobs:
           cat > /tmp/aports/scripts/mkimg.kestrelos.sh << 'EOF'
           profile_kestrelos() {
             profile_standard
-            title="kestrelos"
-            desc="Lightweight Alpine-based kestrelos"
+            title="kestrelOS"
+            desc="Ultra-lightweight Alpine-based kestrelOS (CLI + GUI) for low-RAM laptops"
             arch="x86_64"
             kernel_flavors="lts"
             kernel_cmdline="quiet"
             apks="$apks
-              alpine-base openrc busybox util-linux e2fsprogs dosfstools
-              dropbear openssh-client curl htop tmux git
+              alpine-base openrc busybox util-linux e2fsprogs dosfstools parted
+              syslinux extlinux dropbear openssh-client curl htop tmux git
               labwc foot swaybg seatd dbus eudev mesa-dri-gallium font-dejavu
             "
             apkovl="genapkovl-kestrelos.sh"
@@ -65,77 +65,352 @@ jobs:
           cat > /tmp/aports/scripts/genapkovl-kestrelos.sh << 'EOF'
           #!/bin/sh -e
           HOSTNAME="$1"
-          [ -n "$HOSTNAME" ] || HOSTNAME="kestrelos"
+          [ -n "$HOSTNAME" ] || HOSTNAME="kestrelOS"
 
           cleanup() { rm -rf "$tmp"; }
           tmp="$(mktemp -d)"
           trap cleanup EXIT
 
           mkdir -p "$tmp/etc/apk" "$tmp/etc/init.d" "$tmp/etc/runlevels/boot" \
-                   "$tmp/etc/runlevels/default" "$tmp/etc/kestrelos"
+                   "$tmp/etc/runlevels/default" "$tmp/etc/network" \
+                   "$tmp/etc/sysctl.d" "$tmp/etc/kestrelos" \
+                   "$tmp/etc/labwc" "$tmp/etc/profile.d" \
+                   "$tmp/usr/local/bin" "$tmp/usr/share/backgrounds"
 
           echo "$HOSTNAME" > "$tmp/etc/hostname"
+
+          # Generate custom dark monochrome kestrelOS geometric wallpaper (1280x720 P3 PPM)
+          awk 'BEGIN {
+            w = 1280; h = 720;
+            print "P3";
+            print w " " h;
+            print "255";
+            cx = w / 2; cy = h / 2;
+            for (y = 0; y < h; y++) {
+              for (x = 0; x < w; x++) {
+                # Subtle dark vertical + radial vignette gradient
+                dx = (x - cx) / cx;
+                dy = (y - cy) / cy;
+                dist = sqrt(dx*dx + dy*dy);
+                base = int(18 - dist * 7 + (y / h) * 4);
+                if (base < 8) base = 8;
+                r = base; g = base + 2; b = base + 5;
+
+                # Crisp diagonal grid lines every 80px
+                if ((x + y) % 160 == 0 || (x - y + 1600) % 160 == 0) {
+                  r += 5; g += 6; b += 8;
+                }
+
+                # Minimalist Kestrel twin-chevron emblem in center
+                adx = (x > cx) ? (x - cx) : (cx - x);
+                ady = y - cy;
+                # Upper wing chevron
+                if (adx <= 150 && ady >= -70 + adx * 0.55 && ady <= -46 + adx * 0.55) {
+                  r = 165; g = 185; b = 210;
+                }
+                # Lower wing chevron
+                if (adx <= 110 && ady >= -15 + adx * 0.55 && ady <= 5 + adx * 0.55) {
+                  r = 95; g = 115; b = 140;
+                }
+                # Center accent diamond
+                if (adx + ((ady < 0) ? -ady : ady) <= 14) {
+                  r = 210; g = 225; b = 240;
+                }
+
+                print r, g, b;
+              }
+            }
+          }' > "$tmp/usr/share/backgrounds/kestrelos.ppm"
+
+          cat > "$tmp/etc/issue" << 'ISSUE'
+          kestrelOS (Alpine 3.21 LTS - Low-RAM CLI + GUI)
+          Kernel \r on an \m (\l)
+          Commands: 'kestrel-gui' (start desktop) | 'kestrel-mode cli|gui' | 'kestrel-setup' (install)
+
+          ISSUE
+
+          cat > "$tmp/etc/network/interfaces" << 'NET'
+          auto lo
+          iface lo inet loopback
+
+          auto eth0
+          iface eth0 inet dhcp
+          NET
+
+          cat > "$tmp/etc/sysctl.d/99-kestrelos-lowram.conf" << 'SYSCTL'
+          vm.swappiness = 80
+          vm.vfs_cache_pressure = 50
+          vm.dirty_background_ratio = 5
+          vm.dirty_ratio = 10
+          SYSCTL
 
           cat > "$tmp/etc/apk/world" << 'WORLD'
           alpine-base
           openrc
+          busybox
+          util-linux
+          e2fsprogs
+          dosfstools
+          parted
+          syslinux
+          extlinux
           dropbear
           curl
           htop
           tmux
           git
+          labwc
+          foot
+          swaybg
+          seatd
+          dbus
+          eudev
+          mesa-dri-gallium
+          font-dejavu
           WORLD
 
           cat > "$tmp/etc/kestrelos/kestrelos.conf" << 'CONF'
-          OS_MODE="server"
+          OS_MODE="cli"
           MEMORY_MODE="zram"
-          ZRAM_SIZE="2G"
-          ZRAM_ALGO="zstd"
-          SWAP_SIZE="1G"
+          ZRAM_SIZE="256M"
+          ZRAM_ALGO="lz4"
+          SWAP_SIZE="512M"
           SWAP_FILE="/var/lib/kestrelos/swapfile"
-          SWAPPINESS="60"
+          SWAPPINESS="80"
           SSH_ENABLED="yes"
           SSH_PORT="22"
           OS_THEME="dark"
-          WALLPAPER_URL="https://cdn.discordapp.com/attachments/1572989828767678545/1572990606798749836/wallpaper.png?ex=6b006129&is=6aff0fa9&hm=3206d2f09d3fbd2f80a4b84ac72ce3a2ea3b5d154aad55e0a9fa54da2f3e47f7"
+          WALLPAPER="/usr/share/backgrounds/kestrelos.ppm"
           CONF
+
+          cat > "$tmp/etc/labwc/autostart" << 'LABAUTO'
+          swaybg -i /usr/share/backgrounds/kestrelos.ppm -m fill >/dev/null 2>&1 &
+          foot >/dev/null 2>&1 &
+          LABAUTO
+
+          cat > "$tmp/etc/labwc/rc.xml" << 'LABRC'
+          <?xml version="1.0"?>
+          <labwc_config>
+            <theme>
+              <name>Clearlooks-3.4</name>
+              <cornerRadius>0</cornerRadius>
+            </theme>
+            <keyboard>
+              <keybind key="A-Return">
+                <action name="Execute" command="foot"/>
+              </keybind>
+              <keybind key="A-F4">
+                <action name="Close"/>
+              </keybind>
+              <keybind key="A-Tab">
+                <action name="NextWindow"/>
+              </keybind>
+            </keyboard>
+          </labwc_config>
+          LABRC
+
+          cat > "$tmp/usr/local/bin/kestrel-gui" << 'GUISCRIPT'
+          #!/bin/sh
+          rc-service dbus start >/dev/null 2>&1 || true
+          rc-service seatd start >/dev/null 2>&1 || true
+          export XDG_RUNTIME_DIR="/tmp/xdg-$(id -u)"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          export WLR_RENDERER=pixman
+          exec dbus-run-session labwc -C /etc/labwc
+          GUISCRIPT
+          chmod +x "$tmp/usr/local/bin/kestrel-gui"
+
+          cat > "$tmp/usr/local/bin/kestrel-mode" << 'MODESCRIPT'
+          #!/bin/sh
+          CONF="/etc/kestrelos/kestrelos.conf"
+          case "$1" in
+            cli|gui)
+              sed -i "s/^OS_MODE=.*/OS_MODE=\"$1\"/" "$CONF"
+              echo "kestrelOS default boot mode set to: $1 (both CLI and GUI remain installed)"
+              ;;
+            *)
+              . "$CONF"
+              echo "Current default mode: ${OS_MODE:-cli}"
+              echo "Usage: kestrel-mode [cli|gui]"
+              ;;
+          esac
+          MODESCRIPT
+          chmod +x "$tmp/usr/local/bin/kestrel-mode"
+
+          cat > "$tmp/etc/profile.d/kestrelos-autostart.sh" << 'PROF'
+          if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
+            [ -f "/etc/kestrelos/kestrelos.conf" ] && . "/etc/kestrelos/kestrelos.conf"
+            if [ "${OS_MODE:-cli}" = "gui" ]; then
+              exec /usr/local/bin/kestrel-gui
+            fi
+          fi
+          PROF
 
           cat > "$tmp/etc/init.d/kestrelos-memory" << 'MEMSCRIPT'
           #!/sbin/openrc-run
-          description="Configure kestrelos 2GB zram and swap"
+          description="Configure kestrelOS low-RAM zram and swap"
           depend() {
-            need localmount sysctl
+            need localmount
             before swap
           }
           start() {
             [ -f "/etc/kestrelos/kestrelos.conf" ] && . "/etc/kestrelos/kestrelos.conf"
-            sysctl -w vm.swappiness="${SWAPPINESS:-60}" >/dev/null 2>&1 || true
-            modprobe zram num_devices=1 2>/dev/null || true
+            sysctl -p /etc/sysctl.d/99-kestrelos-lowram.conf >/dev/null 2>&1 || true
+            if [ -d /lib/modules/"$(uname -r)" ]; then
+              modprobe zram num_devices=1 >/dev/null 2>&1 || true
+            fi
             if [ "${MEMORY_MODE:-zram}" = "zram" ] || [ "${MEMORY_MODE:-zram}" = "both" ]; then
               if [ -e /sys/block/zram0 ]; then
                 echo 1 > /sys/block/zram0/reset 2>/dev/null || true
-                echo "${ZRAM_ALGO:-zstd}" > /sys/block/zram0/comp_algorithm 2>/dev/null || true
-                echo "${ZRAM_SIZE:-2G}" > /sys/block/zram0/disksize
-                mkswap /dev/zram0 >/dev/null
-                swapon -p 100 /dev/zram0
+                echo "${ZRAM_ALGO:-lz4}" > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+                echo "${ZRAM_SIZE:-256M}" > /sys/block/zram0/disksize
+                mkswap /dev/zram0 >/dev/null 2>&1 || true
+                swapon -p 100 /dev/zram0 >/dev/null 2>&1 || true
               fi
             fi
             if [ "${MEMORY_MODE:-zram}" = "swap" ] || [ "${MEMORY_MODE:-zram}" = "both" ]; then
               mkdir -p "/var/lib/kestrelos"
-              [ -f "${SWAP_FILE:-/var/lib/kestrelos/swapfile}" ] || fallocate -l "${SWAP_SIZE:-1G}" "${SWAP_FILE:-/var/lib/kestrelos/swapfile}"
-              chmod 600 "${SWAP_FILE:-/var/lib/kestrelos/swapfile}"
-              mkswap "${SWAP_FILE:-/var/lib/kestrelos/swapfile}" >/dev/null
-              swapon -p 10 "${SWAP_FILE:-/var/lib/kestrelos/swapfile}"
+              if [ ! -f "${SWAP_FILE:-/var/lib/kestrelos/swapfile}" ]; then
+                dd if=/dev/zero of="${SWAP_FILE:-/var/lib/kestrelos/swapfile}" bs=1M count=512 >/dev/null 2>&1 || true
+              fi
+              chmod 600 "${SWAP_FILE:-/var/lib/kestrelos/swapfile}" 2>/dev/null || true
+              mkswap "${SWAP_FILE:-/var/lib/kestrelos/swapfile}" >/dev/null 2>&1 || true
+              swapon -p 10 "${SWAP_FILE:-/var/lib/kestrelos/swapfile}" >/dev/null 2>&1 || true
             fi
             eend 0
           }
           MEMSCRIPT
           chmod +x "$tmp/etc/init.d/kestrelos-memory"
 
+          cat > "$tmp/usr/local/bin/kestrel-setup" << 'INSTALLER'
+          #!/bin/sh
+          set -e
+
+          echo "=========================================="
+          echo "     kestrelOS Guided Disk Installer      "
+          echo "     (Includes BOTH CLI + GUI Modes)      "
+          echo "=========================================="
+          echo ""
+          echo "Available disks:"
+          lsblk -d -o NAME,SIZE,MODEL 2>/dev/null || fdisk -l | grep "^Disk /dev/"
+          echo ""
+          printf "Enter target disk (e.g. /dev/sda or /dev/vda): "
+          read -r DISK
+          [ -b "$DISK" ] || { echo "Error: $DISK is not a block device."; exit 1; }
+
+          printf "Enter hostname [kestrelOS]: "
+          read -r HOST_INPUT
+          HOST_INPUT="${HOST_INPUT:-kestrelOS}"
+
+          echo ""
+          echo "Both CLI and GUI will be installed on $DISK."
+          printf "Which mode should start by default on boot? (1 = CLI, 2 = GUI) [2]: "
+          read -r MODE_CHOICE
+          BOOT_MODE="gui"
+          [ "$MODE_CHOICE" = "1" ] && BOOT_MODE="cli"
+
+          printf "Enable swapfile on target disk? (512MB) [Y/n]: "
+          read -r SWAP_ANS
+          SWAP_ANS="${SWAP_ANS:-Y}"
+
+          echo ""
+          echo "WARNING: ALL DATA ON $DISK WILL BE ERASED!"
+          printf "Type YES to continue: "
+          read -r CONFIRM
+          [ "$CONFIRM" = "YES" ] || { echo "Aborted."; exit 1; }
+
+          echo "[1/5] Partitioning and formatting $DISK..."
+          parted -s "$DISK" mklabel msdos
+          parted -s "$DISK" mkpart primary ext4 1MiB 100%
+          PART="${DISK}1"
+          [ -b "$PART" ] || PART="${DISK}p1"
+          mkfs.ext4 -F "$PART" >/dev/null
+
+          echo "[2/5] Mounting target filesystem..."
+          mkdir -p /mnt/target
+          mount "$PART" /mnt/target
+
+          echo "[3/5] Installing full CLI + GUI system..."
+          apk add --root /mnt/target --initdb --no-cache \
+            alpine-base openrc busybox util-linux e2fsprogs \
+            linux-lts syslinux extlinux dropbear curl htop tmux git \
+            labwc foot swaybg seatd dbus eudev mesa-dri-gallium font-dejavu
+
+          echo "[4/5] Applying kestrelOS configuration + custom wallpaper..."
+          echo "$HOST_INPUT" > /mnt/target/etc/hostname
+          cp -f /etc/issue /mnt/target/etc/issue 2>/dev/null || true
+          cat > /mnt/target/etc/network/interfaces << 'EOF'
+          auto lo
+          iface lo inet loopback
+
+          auto eth0
+          iface eth0 inet dhcp
+          EOF
+
+          cp -f /etc/sysctl.d/99-kestrelos-lowram.conf /mnt/target/etc/sysctl.d/ 2>/dev/null || true
+          cp -f /etc/init.d/kestrelos-memory /mnt/target/etc/init.d/ 2>/dev/null || true
+          mkdir -p /mnt/target/etc/kestrelos /mnt/target/etc/labwc /mnt/target/etc/profile.d /mnt/target/usr/local/bin /mnt/target/usr/share/backgrounds
+          cp -f /etc/kestrelos/kestrelos.conf /mnt/target/etc/kestrelos/ 2>/dev/null || true
+          sed -i "s/^OS_MODE=.*/OS_MODE=\"$BOOT_MODE\"/" /mnt/target/etc/kestrelos/kestrelos.conf
+          cp -f /etc/labwc/* /mnt/target/etc/labwc/ 2>/dev/null || true
+          cp -f /etc/profile.d/kestrelos-autostart.sh /mnt/target/etc/profile.d/ 2>/dev/null || true
+          cp -f /usr/local/bin/kestrel-gui /mnt/target/usr/local/bin/ 2>/dev/null || true
+          cp -f /usr/local/bin/kestrel-mode /mnt/target/usr/local/bin/ 2>/dev/null || true
+          cp -f /usr/share/backgrounds/kestrelos.ppm /mnt/target/usr/share/backgrounds/ 2>/dev/null || true
+
+          if [ "$SWAP_ANS" = "Y" ] || [ "$SWAP_ANS" = "y" ]; then
+            mkdir -p /mnt/target/var/lib/kestrelos
+            dd if=/dev/zero of=/mnt/target/var/lib/kestrelos/swapfile bs=1M count=512 >/dev/null 2>&1
+            chmod 600 /mnt/target/var/lib/kestrelos/swapfile
+            mkswap /mnt/target/var/lib/kestrelos/swapfile >/dev/null 2>&1
+            echo "/var/lib/kestrelos/swapfile none swap sw 0 0" >> /mnt/target/etc/fstab
+          fi
+
+          chroot /mnt/target rc-update add devfs sysinit >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add dmesg sysinit >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add networking boot >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add sysctl boot >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add kestrelos-memory boot >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add dbus default >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add seatd default >/dev/null 2>&1 || true
+          chroot /mnt/target rc-update add dropbear default >/dev/null 2>&1 || true
+
+          echo "[5/5] Installing extlinux bootloader..."
+          mkdir -p /mnt/target/boot/extlinux
+          extlinux --install /mnt/target/boot/extlinux >/dev/null
+          dd if=/usr/share/syslinux/mbr.bin of="$DISK" bs=440 count=1 conv=notrunc >/dev/null 2>&1 || true
+
+          UUID_VAL=$(blkid -s UUID -o value "$PART" 2>/dev/null || true)
+          ROOT_ARG="root=$PART"
+          [ -n "$UUID_VAL" ] && ROOT_ARG="root=UUID=$UUID_VAL"
+
+          cat > /mnt/target/boot/extlinux/extlinux.conf << EOF
+          DEFAULT kestrelos
+          TIMEOUT 20
+          LABEL kestrelos
+            MENU LABEL kestrelOS Linux (CLI + GUI)
+            KERNEL /boot/vmlinuz-lts
+            INITRD /boot/initramfs-lts
+            APPEND $ROOT_ARG rw quiet modules=sd-mod,usb-storage,ext4
+          EOF
+
+          echo ""
+          echo "Set root password for the installed system:"
+          chroot /mnt/target passwd root
+
+          umount /mnt/target
+          echo ""
+          echo "Installation complete! Both CLI and GUI are ready (default: $BOOT_MODE)."
+          echo "Remove the ISO and reboot."
+          INSTALLER
+          chmod +x "$tmp/usr/local/bin/kestrel-setup"
+
           ln -sf "/etc/init.d/kestrelos-memory" "$tmp/etc/runlevels/boot/kestrelos-memory"
+          ln -sf /etc/init.d/networking "$tmp/etc/runlevels/boot/networking"
           ln -sf /etc/init.d/dropbear "$tmp/etc/runlevels/default/dropbear"
 
-          tar -c -C "$tmp" etc | gzip -9n > "$HOSTNAME.apkovl.tar.gz"
+          tar -c -C "$tmp" etc usr | gzip -9n > "$HOSTNAME.apkovl.tar.gz"
           EOF
           chmod +x /tmp/aports/scripts/genapkovl-kestrelos.sh
 
